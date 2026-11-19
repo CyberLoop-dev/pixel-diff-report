@@ -12,27 +12,31 @@ def compare_images(before_path, after_path, out_dir, threshold=8):
         raise ValueError(f"Image sizes differ: {before.size} vs {after.size}")
     diff=ImageChops.difference(before,after)
     pixels=list(diff.getdata())
-    changed=sum(1 for pixel in pixels if max(pixel)>threshold)
+    changed_mask=[255 if max(pixel)>threshold else 0 for pixel in pixels]
+    changed=sum(1 for value in changed_mask if value)
     total=before.width*before.height
     mean=round(sum(ImageStat.Stat(diff).mean)/3,3)
-    mask=diff.convert("L").point(lambda value:255 if value>threshold else 0)
+    mask=Image.new("L",before.size)
+    mask.putdata(changed_mask)
     heat=Image.new("RGB",before.size,(18,24,38))
     red=Image.new("RGB",before.size,(255,70,110))
     heat.paste(red,mask=mask)
     overlay=Image.blend(before,after,0.5)
     out=Path(out_dir); out.mkdir(parents=True,exist_ok=True)
-    shutil.copy2(before_path,out/"before"+Path(before_path).suffix.lower())
-    shutil.copy2(after_path,out/"after"+Path(after_path).suffix.lower())
-    diff_path=out/"diff.png"; overlay_path=out/"overlay.png"
-    heat.save(diff_path); overlay.save(overlay_path)
+    before_name="before"+Path(before_path).suffix.lower()
+    after_name="after"+Path(after_path).suffix.lower()
+    shutil.copy2(before_path,out/before_name)
+    shutil.copy2(after_path,out/after_name)
+    heat.save(out/"diff.png"); overlay.save(out/"overlay.png")
     report={"width":before.width,"height":before.height,"total_pixels":total,"changed_pixels":changed,
             "changed_percent":round(changed*100/total,3) if total else 0,"mean_absolute_error":mean,"threshold":threshold}
     (out/"report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
-    before_name="before"+Path(before_path).suffix.lower(); after_name="after"+Path(after_path).suffix.lower()
+    cards=[("Before",before_name),("After",after_name),("Difference heatmap","diff.png"),("50/50 overlay","overlay.png")]
+    stat_cards="".join(f'<section class="card"><small>{html.escape(k.replace("_"," ").title())}</small><h2>{html.escape(str(v))}</h2></section>' for k,v in report.items())
+    image_cards="".join(f'<section class="card"><h3>{label}</h3><img src="{src}" alt="{label}"></section>' for label,src in cards)
     page=f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Pixel Diff Report</title>
 <style>body{{font:16px system-ui;background:#0b1220;color:#e5edf7;margin:0;padding:32px}}main{{max-width:1100px;margin:auto}}h1{{color:#5eead4}}.stats,.images{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}}.card{{background:#142236;border:1px solid #29415a;border-radius:16px;padding:16px}}img{{width:100%;height:auto;border-radius:10px;background:#091423}}small{{color:#9fb0c5}}</style>
-<main><h1>Pixel Diff Report</h1><div class="stats">{''.join(f'<section class="card"><small>{html.escape(k.replace("_"," ").title())}</small><h2>{html.escape(str(v))}</h2></section>' for k,v in report.items())}</div>
-<div class="images">{''.join(f'<section class="card"><h3>{label}</h3><img src="{src}" alt="{label}"></section>' for label,src in [("Before",before_name),("After",after_name),("Difference heatmap","diff.png"),("50/50 overlay","overlay.png")])}</div></main></html>"""
+<main><h1>Pixel Diff Report</h1><div class="stats">{stat_cards}</div><div class="images">{image_cards}</div></main></html>"""
     (out/"index.html").write_text(page,encoding="utf-8")
     return report
 
